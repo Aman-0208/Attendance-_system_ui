@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, Users, CheckCircle, XCircle, AlertCircle, Camera } from 'lucide-react';
 import { mockUsers, mockAttendance } from '../../data/mockData';
 import { useAuth } from '../../context/AuthContext';
 import { AttendanceRecord } from '../../types';
+import CameraAttendance from './CameraAttendance';
 
 const AttendanceTracker: React.FC = () => {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(mockAttendance);
+  const [showCamera, setShowCamera] = useState(false);
 
   const students = mockUsers.filter(u => u.role === 'student');
   const todayAttendance = attendance.filter(a => a.date === selectedDate);
@@ -34,6 +36,13 @@ const AttendanceTracker: React.FC = () => {
       };
       setAttendance(prev => [...prev, newRecord]);
     }
+  };
+
+  const handleCameraAttendance = (detectedStudents: string[]) => {
+    detectedStudents.forEach(studentId => {
+      markAttendance(studentId, 'present');
+    });
+    setShowCamera(false);
   };
 
   const getAttendanceStatus = (studentId: string) => {
@@ -72,11 +81,29 @@ const AttendanceTracker: React.FC = () => {
   const absentCount = todayAttendance.filter(a => a.status === 'absent').length;
   const lateCount = todayAttendance.filter(a => a.status === 'late').length;
 
+  const isTeacher = user?.role === 'teacher';
+  const isStudent = user?.role === 'student';
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Attendance Tracker</h1>
-        <p className="text-gray-600">Mark and manage student attendance</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Attendance Tracker</h1>
+            <p className="text-gray-600">
+              {isStudent ? 'View your attendance status' : 'Mark and manage student attendance'}
+            </p>
+          </div>
+          {isTeacher && (
+            <button
+              onClick={() => setShowCamera(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Camera className="w-4 h-4" />
+              <span>Camera Attendance</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Date Selection and Stats */}
@@ -125,7 +152,7 @@ const AttendanceTracker: React.FC = () => {
           <div className="flex items-center space-x-3">
             <Users className="w-5 h-5 text-gray-600" />
             <h2 className="text-lg font-semibold text-gray-900">
-              Student Attendance - {new Date(selectedDate).toLocaleDateString()}
+              {isStudent ? 'Your Attendance Status' : 'Student Attendance'} - {new Date(selectedDate).toLocaleDateString()}
             </h2>
           </div>
         </div>
@@ -143,13 +170,15 @@ const AttendanceTracker: React.FC = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Time Marked
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
+                {!isStudent && (
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {students.map((student) => {
+              {(isStudent ? students.filter(s => s.id === user?.id) : students).map((student) => {
                 const status = getAttendanceStatus(student.id);
                 const record = todayAttendance.find(a => a.userId === student.id);
                 
@@ -186,40 +215,42 @@ const AttendanceTracker: React.FC = () => {
                         '-'
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex justify-end space-x-2">
-                        <button
-                          onClick={() => markAttendance(student.id, 'present')}
-                          className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                            status === 'present' 
-                              ? 'bg-green-600 text-white' 
-                              : 'bg-green-100 text-green-800 hover:bg-green-200'
-                          }`}
-                        >
-                          Present
-                        </button>
-                        <button
-                          onClick={() => markAttendance(student.id, 'late')}
-                          className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                            status === 'late' 
-                              ? 'bg-yellow-600 text-white' 
-                              : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
-                          }`}
-                        >
-                          Late
-                        </button>
-                        <button
-                          onClick={() => markAttendance(student.id, 'absent')}
-                          className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
-                            status === 'absent' 
-                              ? 'bg-red-600 text-white' 
-                              : 'bg-red-100 text-red-800 hover:bg-red-200'
-                          }`}
-                        >
-                          Absent
-                        </button>
-                      </div>
-                    </td>
+                    {!isStudent && (
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex justify-end space-x-2">
+                          <button
+                            onClick={() => markAttendance(student.id, 'present')}
+                            className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                              status === 'present' 
+                                ? 'bg-green-600 text-white' 
+                                : 'bg-green-100 text-green-800 hover:bg-green-200'
+                            }`}
+                          >
+                            Present
+                          </button>
+                          <button
+                            onClick={() => markAttendance(student.id, 'late')}
+                            className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                              status === 'late' 
+                                ? 'bg-yellow-600 text-white' 
+                                : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                            }`}
+                          >
+                            Late
+                          </button>
+                          <button
+                            onClick={() => markAttendance(student.id, 'absent')}
+                            className={`px-3 py-1 text-xs font-medium rounded-full transition-colors ${
+                              status === 'absent' 
+                                ? 'bg-red-600 text-white' 
+                                : 'bg-red-100 text-red-800 hover:bg-red-200'
+                            }`}
+                          >
+                            Absent
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -227,12 +258,23 @@ const AttendanceTracker: React.FC = () => {
           </table>
         </div>
 
-        {students.length === 0 && (
+        {(isStudent ? students.filter(s => s.id === user?.id) : students).length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-500">No students found in the system.</p>
+            <p className="text-gray-500">
+              {isStudent ? 'No attendance records found.' : 'No students found in the system.'}
+            </p>
           </div>
         )}
       </div>
+
+      {/* Camera Modal */}
+      {showCamera && (
+        <CameraAttendance
+          onClose={() => setShowCamera(false)}
+          onAttendanceMarked={handleCameraAttendance}
+          students={students}
+        />
+      )}
     </div>
   );
 };
