@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, X, Users, CheckCircle, Loader2 } from 'lucide-react';
+import { Camera, X, Users, CheckCircle, Loader2, AlertTriangle } from 'lucide-react';
+import { faceRecognitionService, DetectionResult } from '../../services/faceRecognitionService';
 
 interface CameraAttendanceProps {
   onClose: () => void;
@@ -13,18 +14,28 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
   students 
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
-  const [detectedFaces, setDetectedFaces] = useState<string[]>([]);
+  const [detectedFaces, setDetectedFaces] = useState<DetectionResult[]>([]);
   const [cameraActive, setCameraActive] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [isRealTimeMode, setIsRealTimeMode] = useState(false);
+  const [registeredCount, setRegisteredCount] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     startCamera();
+    loadRegistrationStats();
     return () => {
       stopCamera();
+      stopRealTimeDetection();
     };
   }, []);
+
+  const loadRegistrationStats = () => {
+    const stats = faceRecognitionService.getStats();
+    setRegisteredCount(stats.totalRegistrations);
+  };
 
   const startCamera = async () => {
     try {
@@ -50,19 +61,41 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
     setCameraActive(false);
   };
 
-  const simulateFaceDetection = (): Promise<string[]> => {
-    return new Promise((resolve) => {
-      // Simulate ML processing time
-      setTimeout(() => {
-        // Randomly detect some students for demo purposes
-        const availableStudents = students.map(s => s.id);
-        const numDetected = Math.floor(Math.random() * Math.min(3, availableStudents.length)) + 1;
-        const detected = availableStudents
-          .sort(() => 0.5 - Math.random())
-          .slice(0, numDetected);
-        resolve(detected);
-      }, 3000);
-    });
+  const startRealTimeDetection = async () => {
+    if (!videoRef.current || isRealTimeMode) return;
+    
+    setIsRealTimeMode(true);
+    
+    const detectLoop = async () => {
+      if (!videoRef.current || !isRealTimeMode) return;
+      
+      try {
+        const results = await faceRecognitionService.detectFaces(videoRef.current);
+        setDetectedFaces(results);
+        
+        // Auto-mark attendance for detected faces with high confidence
+        const highConfidenceDetections = results.filter(r => r.confidence > 0.95);
+        if (highConfidenceDetections.length > 0) {
+          const detectedUserIds = highConfidenceDetections.map(r => r.userId);
+          onAttendanceMarked(detectedUserIds);
+        }
+      } catch (error) {
+        console.error('Real-time detection error:', error);
+      }
+    };
+    
+    // Run detection every 2 seconds
+    detectionIntervalRef.current = setInterval(detectLoop, 2000);
+    detectLoop(); // Run immediately
+  };
+
+  const stopRealTimeDetection = () => {
+    setIsRealTimeMode(false);
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current);
+      detectionIntervalRef.current = null;
+    }
+    setDetectedFaces([]);
   };
 
   const captureAndProcess = async () => {
@@ -83,21 +116,18 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
     }
 
     try {
-      // Simulate ML face detection process
-      const detected = await simulateFaceDetection();
+      // Use the face recognition service for detection
+      const detected = await faceRecognitionService.detectFaces(videoRef.current);
       setDetectedFaces(detected);
       
       // Mark attendance for detected students
-      onAttendanceMarked(detected);
+      const detectedUserIds = detected.map(d => d.userId);
+      onAttendanceMarked(detectedUserIds);
     } catch (error) {
       console.error('Face detection error:', error);
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const getStudentName = (studentId: string) => {
-    return students.find(s => s.id === studentId)?.name || 'Unknown';
   };
 
   return (
@@ -135,11 +165,22 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
                 />
                 
                 {/* Processing Overlay */}
-                {isProcessing && (
+                {(isProcessing || isRealTimeMode) && (
                   <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
                     <div className="text-center text-white">
-                      <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-                      <p className="text-sm">Processing faces...</p>
+                      {isProcessing ? (
+                        <>
+                          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                          <p className="text-sm">Processing faces...</p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-8 h-8 mx-auto mb-2 relative">
+                            <div className="absolute inset-0 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          </div>
+                          <p className="text-sm">Real-time detection active</p>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
@@ -157,11 +198,43 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
                 </div>
               </div>
 
+              {/* Face Detection Overlays */}
+              {detectedFaces.map((face, index) => (
+                face.boundingBox && (
+                  <div
+                    key={`${face.userId}-${index}`}
+                    className="absolute border-2 border-green-400 bg-green-400 bg-opacity-20"
+                    style={{
+                      left: `${(face.boundingBox.x / 640) * 100}%`,
+                      top: `${(face.boundingBox.y / 480) * 100}%`,
+                      width: `${(face.boundingBox.width / 640) * 100}%`,
+                      height: `${(face.boundingBox.height / 480) * 100}%`,
+                    }}
+                  >
+                    <div className="absolute -top-6 left-0 bg-green-500 text-white text-xs px-2 py-1 rounded">
+                      {face.userName} ({Math.round(face.confidence * 100)}%)
+                    </div>
+                  </div>
+                )
+              ))}
+
               {/* Controls */}
               <div className="mt-4 flex justify-center space-x-4">
                 <button
+                  onClick={isRealTimeMode ? stopRealTimeDetection : startRealTimeDetection}
+                  disabled={!cameraActive}
+                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg transition-colors ${
+                    isRealTimeMode 
+                      ? 'bg-red-600 text-white hover:bg-red-700' 
+                      : 'bg-green-600 text-white hover:bg-green-700'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>{isRealTimeMode ? 'Stop Real-time' : 'Start Real-time'}</span>
+                </button>
+                <button
                   onClick={captureAndProcess}
-                  disabled={!cameraActive || isProcessing}
+                  disabled={!cameraActive || isProcessing || isRealTimeMode}
                   className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   <Camera className="w-4 h-4" />
@@ -172,6 +245,32 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
 
             {/* Detection Results */}
             <div className="space-y-4">
+              {/* Registration Status */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-3">
+                  <Users className="w-5 h-5 text-gray-600" />
+                  <h3 className="font-medium text-gray-900">System Status</h3>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Registered Faces:</span>
+                    <span className="font-medium">{registeredCount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Detection Mode:</span>
+                    <span className={`font-medium ${isRealTimeMode ? 'text-green-600' : 'text-gray-500'}`}>
+                      {isRealTimeMode ? 'Real-time Active' : 'Manual'}
+                    </span>
+                  </div>
+                </div>
+                {registeredCount === 0 && (
+                  <div className="mt-2 flex items-center space-x-1 text-amber-600">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span className="text-sm">No faces registered yet</span>
+                  </div>
+                )}
+              </div>
+
               <div className="bg-gray-50 rounded-lg p-4">
                 <div className="flex items-center space-x-2 mb-3">
                   <Users className="w-5 h-5 text-gray-600" />
@@ -180,18 +279,22 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
                 
                 {detectedFaces.length > 0 ? (
                   <div className="space-y-2">
-                    {detectedFaces.map((studentId) => (
-                      <div key={studentId} className="flex items-center space-x-2 p-2 bg-green-50 rounded-md">
+                    {detectedFaces.map((face, index) => (
+                      <div key={`${face.userId}-${index}`} className="flex items-center justify-between p-2 bg-green-50 rounded-md">
                         <CheckCircle className="w-4 h-4 text-green-600" />
-                        <span className="text-sm text-green-800 font-medium">
-                          {getStudentName(studentId)}
+                        <span className="text-sm text-green-800 font-medium flex-1 ml-2">
+                          {face.userName}
+                        </span>
+                        <span className="text-xs text-green-600 font-medium">
+                          {Math.round(face.confidence * 100)}%
                         </span>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <p className="text-sm text-gray-500">
-                    {isProcessing ? 'Analyzing faces...' : 'No faces detected yet'}
+                    {isProcessing ? 'Analyzing faces...' : 
+                     isRealTimeMode ? 'Scanning for faces...' : 'No faces detected yet'}
                   </p>
                 )}
               </div>
@@ -200,10 +303,11 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
               <div className="bg-blue-50 rounded-lg p-4">
                 <h4 className="font-medium text-blue-900 mb-2">Instructions</h4>
                 <ul className="text-sm text-blue-800 space-y-1">
-                  <li>• Ensure students are clearly visible</li>
+                  <li>• Ensure registered students are clearly visible</li>
                   <li>• Good lighting is essential</li>
                   <li>• Students should face the camera</li>
-                  <li>• Click "Take Attendance" to process</li>
+                  <li>• Use real-time mode for continuous detection</li>
+                  <li>• Register faces in User Management first</li>
                 </ul>
               </div>
 
@@ -212,7 +316,7 @@ const CameraAttendance: React.FC<CameraAttendanceProps> = ({
                 <h4 className="font-medium text-gray-900 mb-2">Expected Students</h4>
                 <div className="max-h-32 overflow-y-auto">
                   <div className="space-y-1">
-                    {students.map((student) => (
+                    {students.filter(s => faceRecognitionService.isUserRegistered(s.id)).map((student) => (
                       <div key={student.id} className="text-sm text-gray-600 py-1">
                         {student.name}
                       </div>

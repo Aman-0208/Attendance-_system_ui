@@ -7,6 +7,7 @@ interface FormData {
   password: string;
   confirmPassword: string;
   role: 'student' | 'teacher';
+  profileImage: File | null;
 }
 
 const CreateUser: React.FC = () => {
@@ -15,11 +16,13 @@ const CreateUser: React.FC = () => {
     username: '',
     password: '',
     confirmPassword: '',
-    role: 'student'
+    role: 'student',
+    profileImage: null
   });
   const [errors, setErrors] = useState<Partial<FormData>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const validateForm = (): boolean => {
     const newErrors: Partial<FormData> = {};
@@ -44,6 +47,10 @@ const CreateUser: React.FC = () => {
       newErrors.confirmPassword = 'Passwords do not match';
     }
 
+    if (!formData.profileImage) {
+      newErrors.profileImage = 'Profile image is required';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -65,8 +72,15 @@ const CreateUser: React.FC = () => {
       console.log('Creating user:', {
         name: formData.name,
         username: formData.username,
-        role: formData.role
+        role: formData.role,
+        hasProfileImage: !!formData.profileImage
       });
+
+      // In a real implementation, this would:
+      // 1. Upload the image to cloud storage (AWS S3, Cloudinary, etc.)
+      // 2. Extract face encodings from the uploaded image
+      // 3. Store both user data and face encodings in the database
+      // 4. Return success/failure status
 
       setSuccess(true);
       setFormData({
@@ -74,9 +88,11 @@ const CreateUser: React.FC = () => {
         username: '',
         password: '',
         confirmPassword: '',
-        role: 'student'
+        role: 'student',
+        profileImage: null
       });
       setErrors({});
+      setImagePreview(null);
     } catch (error) {
       console.error('Error creating user:', error);
     } finally {
@@ -88,6 +104,45 @@ const CreateUser: React.FC = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }));
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setErrors(prev => ({ ...prev, profileImage: 'Please select a valid image file' }));
+        return;
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setErrors(prev => ({ ...prev, profileImage: 'Image size must be less than 5MB' }));
+        return;
+      }
+
+      setFormData(prev => ({ ...prev, profileImage: file }));
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setImagePreview(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+
+      // Clear any existing errors
+      if (errors.profileImage) {
+        setErrors(prev => ({ ...prev, profileImage: '' }));
+      }
+    }
+  };
+
+  const removeImage = () => {
+    setFormData(prev => ({ ...prev, profileImage: null }));
+    setImagePreview(null);
+    if (errors.profileImage) {
+      setErrors(prev => ({ ...prev, profileImage: '' }));
     }
   };
 
@@ -222,6 +277,61 @@ const CreateUser: React.FC = () => {
               )}
             </div>
 
+            {/* Profile Image Upload */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Profile Image *
+              </label>
+              <div className="space-y-4">
+                {!imagePreview ? (
+                  <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
+                    <div className="space-y-2">
+                      <User className="mx-auto w-12 h-12 text-gray-400" />
+                      <div>
+                        <label htmlFor="profileImage" className="cursor-pointer">
+                          <span className="text-blue-600 hover:text-blue-500 font-medium">
+                            Click to upload
+                          </span>
+                          <span className="text-gray-500"> or drag and drop</span>
+                        </label>
+                        <input
+                          id="profileImage"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          className="hidden"
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        PNG, JPG, JPEG up to 5MB
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <img
+                      src={imagePreview}
+                      alt="Profile preview"
+                      className="w-32 h-32 object-cover rounded-lg border border-gray-300"
+                    />
+                    <button
+                      type="button"
+                      onClick={removeImage}
+                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+              </div>
+              {errors.profileImage && (
+                <div className="mt-1 flex items-center space-x-1">
+                  <AlertCircle className="w-4 h-4 text-red-600" />
+                  <span className="text-red-600 text-sm">{errors.profileImage}</span>
+                </div>
+              )}
+            </div>
+
             {/* Submit Button */}
             <div className="flex justify-end space-x-4">
               <button
@@ -232,10 +342,12 @@ const CreateUser: React.FC = () => {
                     username: '',
                     password: '',
                     confirmPassword: '',
-                    role: 'student'
+                    role: 'student',
+                    profileImage: null
                   });
                   setErrors({});
                   setSuccess(false);
+                  setImagePreview(null);
                 }}
                 className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >

@@ -1,12 +1,23 @@
 import React, { useState } from 'react';
-import { Edit2, Trash2, Search, Filter } from 'lucide-react';
+import { Edit2, Trash2, Search, Filter, Camera, CheckCircle, XCircle } from 'lucide-react';
 import { mockUsers } from '../../data/mockData';
 import { User } from '../../types';
+import FaceRegistration from '../FaceRecognition/FaceRegistration';
+import { faceRecognitionService } from '../../services/faceRecognitionService';
 
 const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>(mockUsers);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [showFaceRegistration, setShowFaceRegistration] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [registeredFaces, setRegisteredFaces] = useState<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    // Load registered faces on component mount
+    const registered = faceRecognitionService.getRegisteredUsers();
+    setRegisteredFaces(new Set(registered.map(reg => reg.userId)));
+  }, []);
 
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -19,6 +30,17 @@ const UserManagement: React.FC = () => {
     if (window.confirm('Are you sure you want to delete this user?')) {
       setUsers(users.filter(user => user.id !== userId));
     }
+  };
+
+  const handleFaceRegistration = (user: User) => {
+    setSelectedUser(user);
+    setShowFaceRegistration(true);
+  };
+
+  const handleRegistrationComplete = (userId: string, faceData: string) => {
+    setRegisteredFaces(prev => new Set([...prev, userId]));
+    setShowFaceRegistration(false);
+    setSelectedUser(null);
   };
 
   const getRoleBadge = (role: string) => {
@@ -87,6 +109,9 @@ const UserManagement: React.FC = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Created
                 </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Face Recognition
+                </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
                 </th>
@@ -118,8 +143,30 @@ const UserManagement: React.FC = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {new Date(user.createdAt).toLocaleDateString()}
                   </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="flex items-center space-x-2">
+                      {registeredFaces.has(user.id) ? (
+                        <div className="flex items-center space-x-1">
+                          <CheckCircle className="w-4 h-4 text-green-600" />
+                          <span className="text-sm text-green-700">Registered</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-1">
+                          <XCircle className="w-4 h-4 text-red-600" />
+                          <span className="text-sm text-red-700">Not Registered</span>
+                        </div>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex justify-end space-x-2">
+                      <button 
+                        onClick={() => handleFaceRegistration(user)}
+                        className="text-purple-600 hover:text-purple-900 p-1 hover:bg-purple-50 rounded"
+                        title="Register Face"
+                      >
+                        <Camera size={16} />
+                      </button>
                       <button className="text-blue-600 hover:text-blue-900 p-1 hover:bg-blue-50 rounded">
                         <Edit2 size={16} />
                       </button>
@@ -143,6 +190,18 @@ const UserManagement: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Face Registration Modal */}
+      {showFaceRegistration && selectedUser && (
+        <FaceRegistration
+          onClose={() => {
+            setShowFaceRegistration(false);
+            setSelectedUser(null);
+          }}
+          onRegistrationComplete={handleRegistrationComplete}
+          user={selectedUser}
+        />
+      )}
     </div>
   );
 };
